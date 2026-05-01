@@ -40,12 +40,35 @@ export async function updateTaskStatus(
   id: string,
   status: TaskStatus
 ): Promise<void> {
+  await updateTask(id, { status });
+}
+
+export interface TaskEdit {
+  name?: string;
+  description?: string;
+  /** ISO date or empty string to clear */
+  dueDate?: string;
+  status?: TaskStatus;
+  /** Empty string clears the category */
+  business?: string;
+}
+
+export async function updateTask(id: string, fields: TaskEdit): Promise<void> {
   const res = await fetch(`${API_BASE}/tasks/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status }),
+    body: JSON.stringify(fields),
   });
-  if (!res.ok) throw new Error("Failed to update task");
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const err = await res.json();
+      detail = err.error || err.details || "";
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail || "Failed to update task");
+  }
 }
 
 export async function fetchScrolls(): Promise<{ scrolls: Scroll[] }> {

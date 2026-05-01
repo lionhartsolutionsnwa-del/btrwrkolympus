@@ -3,8 +3,21 @@ import { Client } from "@notionhq/client";
 import { randomUUID } from "node:crypto";
 import type { Scroll, ScrollFile, TaskStatus } from "@/types";
 import { readScrolls, saveUpload, writeScroll } from "@/lib/storage";
+import { DISCORD_COLORS, notifyDiscord } from "@/lib/discord";
 
 const notion = new Client({ auth: process.env.NOTION_API_KEY });
+
+const STATUS_LABEL: Record<TaskStatus, string> = {
+  todo: "Todo",
+  in_progress: "In Progress",
+  done: "Done",
+};
+
+const STATUS_COLOR: Record<TaskStatus, number> = {
+  todo: DISCORD_COLORS.marble,
+  in_progress: DISCORD_COLORS.amber,
+  done: DISCORD_COLORS.olive,
+};
 
 async function updateNotionStatus(taskId: string, status: TaskStatus) {
   const statusName =
@@ -86,6 +99,46 @@ export async function POST(request: Request) {
     };
 
     await writeScroll(scroll);
+
+    // Fire-and-forget Discord notification — don't block the API response.
+    const fields: Array<{ name: string; value: string; inline?: boolean }> = [];
+    if (scroll.taskName) {
+      fields.push({ name: "Quest", value: scroll.taskName, inline: true });
+    }
+    if (scroll.newStatus) {
+      fields.push({
+        name: "Status",
+        value: `→ ${STATUS_LABEL[scroll.newStatus]}`,
+        inline: true,
+      });
+    }
+    if (scroll.files && scroll.files.length > 0) {
+      fields.push({
+        name: "Files",
+        value: scroll.files.map((f) => `[${f.name}](${f.url})`).join("\n"),
+        inline: false,
+      });
+    }
+    if (scroll.links && scroll.links.length > 0) {
+      fields.push({
+        name: "Links",
+        value: scroll.links.join("\n"),
+        inline: false,
+      });
+    }
+
+    notifyDiscord({
+      embeds: [
+        {
+          title: `📜 ${scroll.author} scrolled`,
+          description: scroll.message,
+          color: scroll.newStatus ? STATUS_COLOR[scroll.newStatus] : DISCORD_COLORS.gold,
+          fields: fields.length ? fields : undefined,
+          timestamp: scroll.createdAt,
+          footer: { text: "Olympus" },
+        },
+      ],
+    });
 
     return NextResponse.json({ success: true, scroll });
   } catch (err: any) {

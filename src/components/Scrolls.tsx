@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import useSWR from "swr";
 import { format } from "date-fns";
-import { Paperclip, Link as LinkIcon, Plus, X } from "lucide-react";
+import { Paperclip, Link as LinkIcon, X } from "lucide-react";
 import type { NotionTask, Scroll, TaskStatus } from "@/types";
-import { createTask, fetchBusinesses, postScroll } from "@/lib/api";
+import { postScroll } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 
 interface ScrollsProps {
@@ -13,7 +12,6 @@ interface ScrollsProps {
   scrolls: Scroll[];
   isLoading: boolean;
   onPosted: () => void;
-  onTasksChange: () => void;
 }
 
 const STATUS_BADGE_CLASS: Record<TaskStatus, string> = {
@@ -29,7 +27,6 @@ export default function Scrolls({
   scrolls,
   isLoading,
   onPosted,
-  onTasksChange,
 }: ScrollsProps) {
   const { t } = useLang();
   const STATUS_LABELS: Record<TaskStatus, string> = {
@@ -50,23 +47,8 @@ export default function Scrolls({
   const [postError, setPostError] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── New Quest form state ────────────────────────────────────────────────
-  const [showNewQuest, setShowNewQuest] = useState(false);
-  const [questName, setQuestName] = useState("");
-  const [questDueDate, setQuestDueDate] = useState("");
-  const [questStatus, setQuestStatus] = useState<"todo" | "in_progress">("todo");
-  const [questBusiness, setQuestBusiness] = useState("");
-  const [creatingQuest, setCreatingQuest] = useState(false);
-  const [questError, setQuestError] = useState("");
-  const [questFlash, setQuestFlash] = useState("");
-
   // ── Feed filter ─────────────────────────────────────────────────────────
   const [showOlder, setShowOlder] = useState(false);
-
-  const { data: businessData } = useSWR("/api/businesses", fetchBusinesses, {
-    revalidateOnFocus: false,
-  });
-  const businesses = businessData?.businesses ?? [];
 
   // Persist author across sessions
   useEffect(() => {
@@ -155,35 +137,6 @@ export default function Scrolls({
     }
   };
 
-  // ── New quest handler ───────────────────────────────────────────────────
-  const handleCreateQuest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setQuestError("");
-    if (!questName.trim()) return setQuestError(t("err.messageRequired"));
-
-    setCreatingQuest(true);
-    try {
-      await createTask({
-        name: questName.trim(),
-        dueDate: questDueDate || undefined,
-        status: questStatus,
-        business: questBusiness || undefined,
-      });
-      setQuestName("");
-      setQuestDueDate("");
-      setQuestStatus("todo");
-      setQuestBusiness("");
-      setShowNewQuest(false);
-      setQuestFlash(t("scroll.questCreated"));
-      setTimeout(() => setQuestFlash(""), 2500);
-      onTasksChange();
-    } catch (err: any) {
-      setQuestError(err.message || t("err.postFailed"));
-    } finally {
-      setCreatingQuest(false);
-    }
-  };
-
   // Reset status if user clears the task selection
   useEffect(() => {
     if (!taskId) setNewStatus("");
@@ -192,101 +145,8 @@ export default function Scrolls({
   return (
     <section className="flex-1 min-h-0 px-5 lg:px-8 py-5 lg:py-6">
       <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-4 h-full min-h-0">
-        {/* ===== LEFT COLUMN: composer + new quest ===== */}
-        <div className="flex flex-col gap-4 self-start">
-          {/* New Quest panel */}
-          <div className="surface-panel p-5 flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="section-title">{t("scroll.createQuestHeading")}</h2>
-              <button
-                type="button"
-                onClick={() => setShowNewQuest(!showNewQuest)}
-                className="ghost-btn"
-                style={{ fontSize: "10px", padding: "6px 12px" }}
-                aria-expanded={showNewQuest}
-              >
-                {showNewQuest ? <X size={11} /> : <Plus size={11} />}
-                {showNewQuest ? t("quests.cancel") : t("scroll.newQuestToggle")}
-              </button>
-            </div>
-
-            {questFlash && (
-              <p
-                className="font-prose"
-                style={{
-                  fontSize: "13px",
-                  color: "var(--color-success)",
-                  margin: 0,
-                }}
-              >
-                ✓ {questFlash}
-              </p>
-            )}
-
-            {showNewQuest && (
-              <form onSubmit={handleCreateQuest} className="animate-fade-in flex flex-col gap-2">
-                <input
-                  type="text"
-                  value={questName}
-                  onChange={(e) => setQuestName(e.target.value)}
-                  placeholder={t("quests.questPrompt")}
-                  className="dark-input"
-                  autoFocus
-                  required
-                />
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="date"
-                    value={questDueDate}
-                    onChange={(e) => setQuestDueDate(e.target.value)}
-                    className="dark-input"
-                    style={{ colorScheme: "light", flex: 1 }}
-                  />
-                  <select
-                    value={questStatus}
-                    onChange={(e) => setQuestStatus(e.target.value as "todo" | "in_progress")}
-                    className="ghost-select"
-                    style={{ flex: 1 }}
-                  >
-                    <option value="todo">{t("quests.statusTodo")}</option>
-                    <option value="in_progress">{t("quests.statusInProgress")}</option>
-                  </select>
-                </div>
-                <select
-                  value={questBusiness}
-                  onChange={(e) => setQuestBusiness(e.target.value)}
-                  className="ghost-select"
-                >
-                  <option value="">{t("quests.category")}</option>
-                  {businesses.map((b) => (
-                    <option key={b.name} value={b.name}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-
-                {questError && (
-                  <p
-                    className="font-prose"
-                    style={{ color: "var(--color-error)", fontSize: "13px", margin: 0 }}
-                  >
-                    {questError}
-                  </p>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={creatingQuest || !questName.trim()}
-                  className="ghost-btn gold"
-                >
-                  {creatingQuest ? t("scroll.creatingQuest") : t("scroll.createQuestSubmit")}
-                </button>
-              </form>
-            )}
-          </div>
-
-          {/* Scroll composer */}
-          <form onSubmit={handleSubmitScroll} className="surface-panel p-5 flex flex-col gap-3">
+        {/* ===== LEFT COLUMN: composer ===== */}
+        <form onSubmit={handleSubmitScroll} className="surface-panel p-5 flex flex-col gap-3 self-start">
             <h2 className="section-title">{t("scroll.compose")}</h2>
 
             <input
@@ -470,8 +330,7 @@ export default function Scrolls({
             >
               {submitting ? t("scroll.sealing") : t("scroll.seal")}
             </button>
-          </form>
-        </div>
+        </form>
 
         {/* ===== RIGHT COLUMN: feed ===== */}
         <div className="surface-panel flex flex-col overflow-hidden min-h-[340px]">

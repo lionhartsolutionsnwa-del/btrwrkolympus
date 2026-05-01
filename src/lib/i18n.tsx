@@ -22,7 +22,23 @@ type DictKey =
   | "btn.summoning"
   // Tabs
   | "tab.olympus"
+  | "tab.quests"
   | "tab.scrolls"
+  // Quests editor
+  | "quests.editor.heading"
+  | "quests.editor.empty"
+  | "quests.editor.name"
+  | "quests.editor.description"
+  | "quests.editor.descriptionPlaceholder"
+  | "quests.editor.due"
+  | "quests.editor.status"
+  | "quests.editor.category"
+  | "quests.editor.save"
+  | "quests.editor.saving"
+  | "quests.editor.saved"
+  | "quests.editor.cancel"
+  | "quests.editor.editButton"
+  | "quests.editor.noDue"
   // Stats
   | "stat.openQuests"
   | "stat.dueToday"
@@ -109,7 +125,27 @@ const dict: Record<DictKey, Record<Lang, string>> = {
 
   // Tabs
   "tab.olympus": { en: "Olympus", zh: "奥林匹斯" },
+  "tab.quests": { en: "Quests", zh: "任务" },
   "tab.scrolls": { en: "Scrolls", zh: "卷轴" },
+
+  // Quests editor
+  "quests.editor.heading": { en: "All Quests", zh: "全部任务" },
+  "quests.editor.empty": { en: "No quests yet — forge one above.", zh: "暂无任务，可在上方创建。" },
+  "quests.editor.name": { en: "Name", zh: "名称" },
+  "quests.editor.description": { en: "Description", zh: "描述" },
+  "quests.editor.descriptionPlaceholder": {
+    en: "Describe the quest…",
+    zh: "描述这项任务…",
+  },
+  "quests.editor.due": { en: "Due Date", zh: "截止日期" },
+  "quests.editor.status": { en: "Status", zh: "状态" },
+  "quests.editor.category": { en: "Category", zh: "分类" },
+  "quests.editor.save": { en: "Save", zh: "保存" },
+  "quests.editor.saving": { en: "Saving…", zh: "保存中…" },
+  "quests.editor.saved": { en: "Saved", zh: "已保存" },
+  "quests.editor.cancel": { en: "Cancel", zh: "取消" },
+  "quests.editor.editButton": { en: "Edit", zh: "编辑" },
+  "quests.editor.noDue": { en: "No due date", zh: "无截止日期" },
 
   // Stats
   "stat.openQuests": { en: "Open Quests", zh: "进行中任务" },

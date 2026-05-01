@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Client } from "@notionhq/client";
 import type { TaskStatus } from "@/types";
+import { DISCORD_COLORS, notifyDiscord } from "@/lib/discord";
 
 const notion = new Client({
   auth: process.env.NOTION_API_KEY,
@@ -138,6 +139,27 @@ export async function POST(request: Request) {
     const page: any = await notion.pages.create({
       parent: { database_id: databaseId },
       properties,
+    });
+
+    // Fire-and-forget Discord notification
+    const fields: Array<{ name: string; value: string; inline?: boolean }> = [];
+    if (business) fields.push({ name: "Category", value: business, inline: true });
+    if (dueDate) fields.push({ name: "Due", value: dueDate.slice(0, 10), inline: true });
+    fields.push({
+      name: "Status",
+      value: status === "in_progress" ? "In Progress" : "Todo",
+      inline: true,
+    });
+    notifyDiscord({
+      embeds: [
+        {
+          title: `🗡 New quest forged`,
+          description: name.trim(),
+          color: DISCORD_COLORS.gold,
+          fields,
+          footer: { text: "Olympus" },
+        },
+      ],
     });
 
     return NextResponse.json({

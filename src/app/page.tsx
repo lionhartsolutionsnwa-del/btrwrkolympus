@@ -6,6 +6,7 @@ import Header from "@/components/Header";
 import Overview from "@/components/Overview";
 import TaskList from "@/components/TaskList";
 import Calendar from "@/components/Calendar";
+import Quests from "@/components/Quests";
 import Scrolls from "@/components/Scrolls";
 import { fetchScrolls, fetchTasks } from "@/lib/api";
 import type { TaskFilter } from "@/types";
@@ -13,7 +14,7 @@ import { filterTasks, getTasksByDate } from "@/lib/utils";
 import Toast from "@/components/Toast";
 import { useLang } from "@/lib/i18n";
 
-type DashboardTab = "olympus" | "scrolls";
+type DashboardTab = "olympus" | "quests" | "scrolls";
 
 export default function Home() {
   const { t } = useLang();
@@ -25,6 +26,7 @@ export default function Home() {
 
   const TABS: Array<{ key: DashboardTab; label: string; glyph: string }> = [
     { key: "olympus", label: t("tab.olympus"), glyph: "⚜" },
+    { key: "quests", label: t("tab.quests"), glyph: "🗡" },
     { key: "scrolls", label: t("tab.scrolls"), glyph: "📜" },
   ];
 
@@ -129,13 +131,20 @@ export default function Home() {
         </>
       )}
 
+      {activeTab === "quests" && (
+        <Quests
+          tasks={tasks}
+          isLoading={isLoading}
+          onTasksChange={() => mutateTasks()}
+        />
+      )}
+
       {activeTab === "scrolls" && (
         <Scrolls
           tasks={tasks}
           scrolls={scrolls}
           isLoading={isLoading || isLoadingScrolls}
           onPosted={handleScrollPosted}
-          onTasksChange={() => mutateTasks()}
         />
       )}
 
