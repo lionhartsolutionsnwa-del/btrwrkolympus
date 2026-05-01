@@ -135,6 +135,7 @@ export default function Home() {
           scrolls={scrolls}
           isLoading={isLoading || isLoadingScrolls}
           onPosted={handleScrollPosted}
+          onTasksChange={() => mutateTasks()}
         />
       )}
 

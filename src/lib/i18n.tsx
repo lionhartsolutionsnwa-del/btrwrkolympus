@@ -76,6 +76,14 @@ type DictKey =
   | "scroll.feedCount"
   | "scroll.feedEmpty"
   | "scroll.questChip"
+  | "scroll.showOlder"
+  | "scroll.hideOlder"
+  | "scroll.olderCount"
+  | "scroll.newQuestToggle"
+  | "scroll.createQuestHeading"
+  | "scroll.createQuestSubmit"
+  | "scroll.creatingQuest"
+  | "scroll.questCreated"
   // Toasts / errors
   | "toast.synced"
   | "toast.syncFailed"
@@ -165,6 +173,14 @@ const dict: Record<DictKey, Record<Lang, string>> = {
     zh: "抄写官沉默。尚无卷轴。",
   },
   "scroll.questChip": { en: "Quest", zh: "任务" },
+  "scroll.showOlder": { en: "Show older scrolls", zh: "显示更早的卷轴" },
+  "scroll.hideOlder": { en: "Hide older scrolls", zh: "隐藏更早的卷轴" },
+  "scroll.olderCount": { en: "older", zh: "更早的" },
+  "scroll.newQuestToggle": { en: "New Quest", zh: "新任务" },
+  "scroll.createQuestHeading": { en: "Forge a New Quest", zh: "锻造新任务" },
+  "scroll.createQuestSubmit": { en: "Create Quest", zh: "创建任务" },
+  "scroll.creatingQuest": { en: "Creating…", zh: "创建中…" },
+  "scroll.questCreated": { en: "Quest etched into Notion", zh: "任务已刻入 Notion" },
 
   // Toasts / errors
   "toast.synced": { en: "Olympus is in tune", zh: "奥林匹斯协调一致" },

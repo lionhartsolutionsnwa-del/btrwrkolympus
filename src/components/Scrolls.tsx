@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import useSWR from "swr";
 import { format } from "date-fns";
-import { Paperclip, Link as LinkIcon, X } from "lucide-react";
+import { Paperclip, Link as LinkIcon, Plus, X } from "lucide-react";
 import type { NotionTask, Scroll, TaskStatus } from "@/types";
-import { postScroll } from "@/lib/api";
+import { createTask, fetchBusinesses, postScroll } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 
 interface ScrollsProps {
@@ -12,6 +13,7 @@ interface ScrollsProps {
   scrolls: Scroll[];
   isLoading: boolean;
   onPosted: () => void;
+  onTasksChange: () => void;
 }
 
 const STATUS_BADGE_CLASS: Record<TaskStatus, string> = {
@@ -20,7 +22,15 @@ const STATUS_BADGE_CLASS: Record<TaskStatus, string> = {
   done: "done",
 };
 
-export default function Scrolls({ tasks, scrolls, isLoading, onPosted }: ScrollsProps) {
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+export default function Scrolls({
+  tasks,
+  scrolls,
+  isLoading,
+  onPosted,
+  onTasksChange,
+}: ScrollsProps) {
   const { t } = useLang();
   const STATUS_LABELS: Record<TaskStatus, string> = {
     todo: t("quests.badge.todo"),
@@ -28,7 +38,7 @@ export default function Scrolls({ tasks, scrolls, isLoading, onPosted }: Scrolls
     done: t("quests.badge.done"),
   };
 
-  // Composer state
+  // ── Composer state ──────────────────────────────────────────────────────
   const [author, setAuthor] = useState<string>("");
   const [message, setMessage] = useState("");
   const [taskId, setTaskId] = useState<string>("");
@@ -40,9 +50,28 @@ export default function Scrolls({ tasks, scrolls, isLoading, onPosted }: Scrolls
   const [postError, setPostError] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Remember author across sessions so user doesn't retype it
+  // ── New Quest form state ────────────────────────────────────────────────
+  const [showNewQuest, setShowNewQuest] = useState(false);
+  const [questName, setQuestName] = useState("");
+  const [questDueDate, setQuestDueDate] = useState("");
+  const [questStatus, setQuestStatus] = useState<"todo" | "in_progress">("todo");
+  const [questBusiness, setQuestBusiness] = useState("");
+  const [creatingQuest, setCreatingQuest] = useState(false);
+  const [questError, setQuestError] = useState("");
+  const [questFlash, setQuestFlash] = useState("");
+
+  // ── Feed filter ─────────────────────────────────────────────────────────
+  const [showOlder, setShowOlder] = useState(false);
+
+  const { data: businessData } = useSWR("/api/businesses", fetchBusinesses, {
+    revalidateOnFocus: false,
+  });
+  const businesses = businessData?.businesses ?? [];
+
+  // Persist author across sessions
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem("olympus.author") : null;
+    const saved =
+      typeof window !== "undefined" ? window.localStorage.getItem("olympus.author") : null;
     if (saved) setAuthor(saved);
   }, []);
 
@@ -54,10 +83,24 @@ export default function Scrolls({ tasks, scrolls, isLoading, onPosted }: Scrolls
 
   const taskLookup = useMemo(() => {
     const map = new Map<string, NotionTask>();
-    tasks.forEach((t) => map.set(t.id, t));
+    tasks.forEach((task) => map.set(task.id, task));
     return map;
   }, [tasks]);
 
+  // Split scrolls into recent (≤7 days) and older
+  const { recentScrolls, olderScrolls } = useMemo(() => {
+    const cutoff = Date.now() - ONE_WEEK_MS;
+    const recent: Scroll[] = [];
+    const older: Scroll[] = [];
+    for (const s of scrolls) {
+      const ts = new Date(s.createdAt).getTime();
+      if (ts >= cutoff) recent.push(s);
+      else older.push(s);
+    }
+    return { recentScrolls: recent, olderScrolls: older };
+  }, [scrolls]);
+
+  // ── Composer handlers ───────────────────────────────────────────────────
   const handleAddLink = () => {
     const trimmed = linkInput.trim();
     if (!trimmed) return;
@@ -71,16 +114,13 @@ export default function Scrolls({ tasks, scrolls, isLoading, onPosted }: Scrolls
   };
 
   const handleRemoveLink = (idx: number) => setLinks(links.filter((_, i) => i !== idx));
-
   const handleFiles = (incoming: FileList | null) => {
     if (!incoming) return;
-    const arr = Array.from(incoming);
-    setFiles([...files, ...arr]);
+    setFiles([...files, ...Array.from(incoming)]);
   };
-
   const handleRemoveFile = (idx: number) => setFiles(files.filter((_, i) => i !== idx));
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmitScroll = async (e: React.FormEvent) => {
     e.preventDefault();
     setPostError("");
     if (!author.trim()) return setPostError(t("err.authorRequired"));
@@ -93,23 +133,20 @@ export default function Scrolls({ tasks, scrolls, isLoading, onPosted }: Scrolls
       fd.append("message", message.trim());
       if (taskId) {
         fd.append("taskId", taskId);
-        const t = taskLookup.get(taskId);
-        if (t) fd.append("taskName", t.name);
+        const task = taskLookup.get(taskId);
+        if (task) fd.append("taskName", task.name);
       }
       if (newStatus) fd.append("newStatus", newStatus);
       links.forEach((l) => fd.append("links", l));
       files.forEach((f) => fd.append("files", f));
-
       await postScroll(fd);
 
-      // Reset (keep author)
       setMessage("");
       setTaskId("");
       setNewStatus("");
       setLinks([]);
       setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
-
       onPosted();
     } catch (err: any) {
       setPostError(err.message || t("err.postFailed"));
@@ -118,190 +155,325 @@ export default function Scrolls({ tasks, scrolls, isLoading, onPosted }: Scrolls
     }
   };
 
+  // ── New quest handler ───────────────────────────────────────────────────
+  const handleCreateQuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setQuestError("");
+    if (!questName.trim()) return setQuestError(t("err.messageRequired"));
+
+    setCreatingQuest(true);
+    try {
+      await createTask({
+        name: questName.trim(),
+        dueDate: questDueDate || undefined,
+        status: questStatus,
+        business: questBusiness || undefined,
+      });
+      setQuestName("");
+      setQuestDueDate("");
+      setQuestStatus("todo");
+      setQuestBusiness("");
+      setShowNewQuest(false);
+      setQuestFlash(t("scroll.questCreated"));
+      setTimeout(() => setQuestFlash(""), 2500);
+      onTasksChange();
+    } catch (err: any) {
+      setQuestError(err.message || t("err.postFailed"));
+    } finally {
+      setCreatingQuest(false);
+    }
+  };
+
+  // Reset status if user clears the task selection
+  useEffect(() => {
+    if (!taskId) setNewStatus("");
+  }, [taskId]);
+
   return (
     <section className="flex-1 min-h-0 px-5 lg:px-8 py-5 lg:py-6">
       <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-4 h-full min-h-0">
-        {/* === Composer === */}
-        <form onSubmit={handleSubmit} className="surface-panel p-5 flex flex-col gap-3 self-start">
-          <h2 className="section-title">{t("scroll.compose")}</h2>
-
-          <input
-            type="text"
-            value={author}
-            onChange={(e) => setAuthor(e.target.value)}
-            placeholder={t("scroll.author")}
-            className="dark-input"
-            aria-label="Author"
-          />
-
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder={t("scroll.message")}
-            rows={4}
-            className="dark-input"
-            style={{ resize: "vertical", minHeight: "90px" }}
-            aria-label="Message"
-          />
-
-          <div className="flex flex-col gap-2">
-            <label className="eyebrow-label">{t("scroll.questOptional")}</label>
-            <select
-              value={taskId}
-              onChange={(e) => setTaskId(e.target.value)}
-              className="ghost-select"
-              aria-label="Task"
-            >
-              <option value="">{t("scroll.noQuest")}</option>
-              {tasks.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                  {t.business ? ` · ${t.business}` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {taskId && (
-            <div className="flex flex-col gap-2">
-              <label className="eyebrow-label">{t("scroll.markProgress")}</label>
-              <select
-                value={newStatus}
-                onChange={(e) => setNewStatus(e.target.value as TaskStatus | "")}
-                className="ghost-select"
-                aria-label="New status"
+        {/* ===== LEFT COLUMN: composer + new quest ===== */}
+        <div className="flex flex-col gap-4 self-start">
+          {/* New Quest panel */}
+          <div className="surface-panel p-5 flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="section-title">{t("scroll.createQuestHeading")}</h2>
+              <button
+                type="button"
+                onClick={() => setShowNewQuest(!showNewQuest)}
+                className="ghost-btn"
+                style={{ fontSize: "10px", padding: "6px 12px" }}
+                aria-expanded={showNewQuest}
               >
-                <option value="">{t("scroll.noChange")}</option>
-                <option value="todo">{t("scroll.markTodo")}</option>
-                <option value="in_progress">{t("quests.badge.inProgress")}</option>
-                <option value="done">{t("quests.statusDone")}</option>
-              </select>
-            </div>
-          )}
-
-          {/* Links */}
-          <div className="flex flex-col gap-2">
-            <label className="eyebrow-label">{t("scroll.links")}</label>
-            <div className="flex gap-2">
-              <input
-                type="url"
-                value={linkInput}
-                onChange={(e) => setLinkInput(e.target.value)}
-                placeholder={t("scroll.linkPlaceholder")}
-                className="dark-input"
-                style={{ flex: 1 }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddLink();
-                  }
-                }}
-              />
-              <button type="button" onClick={handleAddLink} className="ghost-btn">
-                <LinkIcon size={12} />
-                {t("scroll.add")}
+                {showNewQuest ? <X size={11} /> : <Plus size={11} />}
+                {showNewQuest ? t("quests.cancel") : t("scroll.newQuestToggle")}
               </button>
             </div>
-            {links.length > 0 && (
-              <ul className="flex flex-col gap-1 list-none m-0 p-0">
-                {links.map((l, idx) => (
-                  <li key={idx} className="flex items-center gap-2 text-[12px]">
-                    <LinkIcon size={11} style={{ color: "var(--color-gold)" }} />
-                    <span style={{ color: "var(--color-text-secondary)", flex: 1, wordBreak: "break-all" }}>
-                      {l}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveLink(idx)}
-                      aria-label="Remove link"
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "var(--color-text-tertiary)",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <X size={11} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
+
+            {questFlash && (
+              <p
+                className="font-prose"
+                style={{
+                  fontSize: "13px",
+                  color: "var(--color-success)",
+                  margin: 0,
+                }}
+              >
+                ✓ {questFlash}
+              </p>
+            )}
+
+            {showNewQuest && (
+              <form onSubmit={handleCreateQuest} className="animate-fade-in flex flex-col gap-2">
+                <input
+                  type="text"
+                  value={questName}
+                  onChange={(e) => setQuestName(e.target.value)}
+                  placeholder={t("quests.questPrompt")}
+                  className="dark-input"
+                  autoFocus
+                  required
+                />
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="date"
+                    value={questDueDate}
+                    onChange={(e) => setQuestDueDate(e.target.value)}
+                    className="dark-input"
+                    style={{ colorScheme: "light", flex: 1 }}
+                  />
+                  <select
+                    value={questStatus}
+                    onChange={(e) => setQuestStatus(e.target.value as "todo" | "in_progress")}
+                    className="ghost-select"
+                    style={{ flex: 1 }}
+                  >
+                    <option value="todo">{t("quests.statusTodo")}</option>
+                    <option value="in_progress">{t("quests.statusInProgress")}</option>
+                  </select>
+                </div>
+                <select
+                  value={questBusiness}
+                  onChange={(e) => setQuestBusiness(e.target.value)}
+                  className="ghost-select"
+                >
+                  <option value="">{t("quests.category")}</option>
+                  {businesses.map((b) => (
+                    <option key={b.name} value={b.name}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+
+                {questError && (
+                  <p
+                    className="font-prose"
+                    style={{ color: "var(--color-error)", fontSize: "13px", margin: 0 }}
+                  >
+                    {questError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={creatingQuest || !questName.trim()}
+                  className="ghost-btn gold"
+                >
+                  {creatingQuest ? t("scroll.creatingQuest") : t("scroll.createQuestSubmit")}
+                </button>
+              </form>
             )}
           </div>
 
-          {/* Files */}
-          <div className="flex flex-col gap-2">
-            <label className="eyebrow-label">{t("scroll.files")}</label>
-            <label
-              className="ghost-btn"
-              style={{ alignSelf: "flex-start", cursor: "pointer", padding: "7px 12px" }}
-            >
-              <Paperclip size={12} />
-              <span>{t("scroll.attachFile")}</span>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                hidden
-                onChange={(e) => handleFiles(e.target.files)}
-              />
-            </label>
-            {files.length > 0 && (
-              <ul className="flex flex-col gap-1 list-none m-0 p-0">
-                {files.map((f, idx) => (
-                  <li key={idx} className="flex items-center gap-2 text-[12px]">
-                    <Paperclip size={11} style={{ color: "var(--color-gold)" }} />
-                    <span
-                      style={{
-                        color: "var(--color-text-secondary)",
-                        flex: 1,
-                        wordBreak: "break-all",
-                      }}
-                    >
-                      {f.name}{" "}
-                      <span style={{ color: "var(--color-text-tertiary)" }}>
-                        ({(f.size / 1024).toFixed(1)} KB)
+          {/* Scroll composer */}
+          <form onSubmit={handleSubmitScroll} className="surface-panel p-5 flex flex-col gap-3">
+            <h2 className="section-title">{t("scroll.compose")}</h2>
+
+            <input
+              type="text"
+              value={author}
+              onChange={(e) => setAuthor(e.target.value)}
+              placeholder={t("scroll.author")}
+              className="dark-input"
+              aria-label="Author"
+            />
+
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder={t("scroll.message")}
+              rows={4}
+              className="dark-input"
+              style={{ resize: "vertical", minHeight: "90px" }}
+              aria-label="Message"
+            />
+
+            <div className="flex flex-col gap-2">
+              <label className="eyebrow-label">{t("scroll.questOptional")}</label>
+              <select
+                value={taskId}
+                onChange={(e) => setTaskId(e.target.value)}
+                className="ghost-select"
+                aria-label="Task"
+              >
+                <option value="">{t("scroll.noQuest")}</option>
+                {tasks
+                  .filter((task) => task.status !== "done")
+                  .map((task) => (
+                    <option key={task.id} value={task.id}>
+                      {task.name}
+                      {task.business ? ` · ${task.business}` : ""}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {taskId && (
+              <div className="flex flex-col gap-2">
+                <label className="eyebrow-label">{t("scroll.markProgress")}</label>
+                <select
+                  value={newStatus}
+                  onChange={(e) => setNewStatus(e.target.value as TaskStatus | "")}
+                  className="ghost-select"
+                  aria-label="New status"
+                >
+                  <option value="">{t("scroll.noChange")}</option>
+                  <option value="in_progress">{t("quests.badge.inProgress")}</option>
+                  <option value="done">{t("quests.statusDone")}</option>
+                </select>
+              </div>
+            )}
+
+            {/* Links */}
+            <div className="flex flex-col gap-2">
+              <label className="eyebrow-label">{t("scroll.links")}</label>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={linkInput}
+                  onChange={(e) => setLinkInput(e.target.value)}
+                  placeholder={t("scroll.linkPlaceholder")}
+                  className="dark-input"
+                  style={{ flex: 1 }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddLink();
+                    }
+                  }}
+                />
+                <button type="button" onClick={handleAddLink} className="ghost-btn">
+                  <LinkIcon size={12} />
+                  {t("scroll.add")}
+                </button>
+              </div>
+              {links.length > 0 && (
+                <ul className="flex flex-col gap-1 list-none m-0 p-0">
+                  {links.map((l, idx) => (
+                    <li key={idx} className="flex items-center gap-2 text-[12px]">
+                      <LinkIcon size={11} style={{ color: "var(--color-gold)" }} />
+                      <span
+                        style={{
+                          color: "var(--color-text-secondary)",
+                          flex: 1,
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {l}
                       </span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveFile(idx)}
-                      aria-label="Remove file"
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "var(--color-text-tertiary)",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <X size={11} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveLink(idx)}
+                        aria-label="Remove link"
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "var(--color-text-tertiary)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <X size={11} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* Files */}
+            <div className="flex flex-col gap-2">
+              <label className="eyebrow-label">{t("scroll.files")}</label>
+              <label
+                className="ghost-btn"
+                style={{ alignSelf: "flex-start", cursor: "pointer", padding: "7px 12px" }}
+              >
+                <Paperclip size={12} />
+                <span>{t("scroll.attachFile")}</span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  hidden
+                  onChange={(e) => handleFiles(e.target.files)}
+                />
+              </label>
+              {files.length > 0 && (
+                <ul className="flex flex-col gap-1 list-none m-0 p-0">
+                  {files.map((f, idx) => (
+                    <li key={idx} className="flex items-center gap-2 text-[12px]">
+                      <Paperclip size={11} style={{ color: "var(--color-gold)" }} />
+                      <span
+                        style={{
+                          color: "var(--color-text-secondary)",
+                          flex: 1,
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {f.name}{" "}
+                        <span style={{ color: "var(--color-text-tertiary)" }}>
+                          ({(f.size / 1024).toFixed(1)} KB)
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFile(idx)}
+                        aria-label="Remove file"
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "var(--color-text-tertiary)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <X size={11} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {postError && (
+              <p
+                className="font-prose"
+                style={{ color: "var(--color-error)", fontSize: "13px", margin: 0 }}
+              >
+                {postError}
+              </p>
             )}
-          </div>
 
-          {postError && (
-            <p
-              className="font-prose"
-              style={{ color: "var(--color-error)", fontSize: "13px", margin: 0 }}
+            <button
+              type="submit"
+              disabled={submitting || !author.trim() || !message.trim()}
+              className="ghost-btn gold"
+              style={{ marginTop: "4px" }}
             >
-              {postError}
-            </p>
-          )}
+              {submitting ? t("scroll.sealing") : t("scroll.seal")}
+            </button>
+          </form>
+        </div>
 
-          <button
-            type="submit"
-            disabled={submitting || !author.trim() || !message.trim()}
-            className="ghost-btn gold"
-            style={{ marginTop: "4px" }}
-          >
-            {submitting ? t("scroll.sealing") : t("scroll.seal")}
-          </button>
-        </form>
-
-        {/* === Feed === */}
+        {/* ===== RIGHT COLUMN: feed ===== */}
         <div className="surface-panel flex flex-col overflow-hidden min-h-[340px]">
           <div
             className="px-6 py-4 border-b flex items-center justify-between"
@@ -312,7 +484,7 @@ export default function Scrolls({ tasks, scrolls, isLoading, onPosted }: Scrolls
               className="font-mono"
               style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}
             >
-              {scrolls.length} {t("scroll.feedCount")}
+              {recentScrolls.length} {t("scroll.feedCount")}
             </span>
           </div>
 
@@ -331,7 +503,7 @@ export default function Scrolls({ tasks, scrolls, isLoading, onPosted }: Scrolls
                   />
                 ))}
               </div>
-            ) : scrolls.length === 0 ? (
+            ) : recentScrolls.length === 0 && (!showOlder || olderScrolls.length === 0) ? (
               <div className="h-full grid place-items-center px-6 py-10 text-center">
                 <p
                   className="font-prose"
@@ -342,112 +514,163 @@ export default function Scrolls({ tasks, scrolls, isLoading, onPosted }: Scrolls
               </div>
             ) : (
               <ul className="list-none m-0 p-0">
-                {scrolls.map((scroll) => (
-                  <li
-                    key={scroll.id}
-                    className="px-6 py-5"
-                    style={{ borderBottom: "1px solid var(--color-border)" }}
-                  >
-                    <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                      <div className="flex items-baseline gap-2 flex-wrap">
-                        <span
-                          className="font-display"
-                          style={{
-                            fontSize: "13px",
-                            fontWeight: 600,
-                            color: "var(--color-gold)",
-                            letterSpacing: "0.06em",
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          {scroll.author}
-                        </span>
-                        {scroll.newStatus && (
-                          <span
-                            className={`status-badge ${STATUS_BADGE_CLASS[scroll.newStatus]}`}
-                          >
-                            → {STATUS_LABELS[scroll.newStatus]}
-                          </span>
-                        )}
-                      </div>
-                      <span
-                        className="font-mono"
-                        style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}
-                      >
-                        {format(new Date(scroll.createdAt), "MMM d · HH:mm")}
-                      </span>
-                    </div>
-
-                    <p
-                      className="font-prose mt-2"
-                      style={{
-                        fontSize: "15px",
-                        lineHeight: 1.6,
-                        color: "var(--color-text-primary)",
-                        whiteSpace: "pre-wrap",
-                        margin: "8px 0 0",
-                      }}
-                    >
-                      {scroll.message}
-                    </p>
-
-                    {scroll.taskName && (
-                      <div className="mt-2 flex items-center gap-2 flex-wrap">
-                        <span className="business-chip">{t("scroll.questChip")}</span>
-                        <span style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>
-                          {scroll.taskName}
-                        </span>
-                      </div>
-                    )}
-
-                    {scroll.links && scroll.links.length > 0 && (
-                      <ul className="mt-2 flex flex-col gap-1 list-none m-0 p-0">
-                        {scroll.links.map((l, idx) => (
-                          <li key={idx} className="flex items-center gap-2 text-[13px]">
-                            <LinkIcon size={11} style={{ color: "var(--color-gold)" }} />
-                            <a
-                              href={l}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              style={{ color: "var(--color-info)", wordBreak: "break-all" }}
-                            >
-                              {l}
-                            </a>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    {scroll.files && scroll.files.length > 0 && (
-                      <ul className="mt-2 flex flex-col gap-1 list-none m-0 p-0">
-                        {scroll.files.map((f, idx) => (
-                          <li key={idx} className="flex items-center gap-2 text-[13px]">
-                            <Paperclip size={11} style={{ color: "var(--color-gold)" }} />
-                            <a
-                              href={f.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              style={{ color: "var(--color-info)" }}
-                            >
-                              {f.name}
-                            </a>
-                            <span
-                              className="font-mono"
-                              style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}
-                            >
-                              {(f.size / 1024).toFixed(1)} KB
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </li>
+                {recentScrolls.map((scroll) => (
+                  <ScrollRow key={scroll.id} scroll={scroll} statusLabels={STATUS_LABELS} t={t} />
                 ))}
+
+                {/* Older scrolls (collapsed by default) */}
+                {showOlder &&
+                  olderScrolls.map((scroll) => (
+                    <ScrollRow
+                      key={scroll.id}
+                      scroll={scroll}
+                      statusLabels={STATUS_LABELS}
+                      t={t}
+                      muted
+                    />
+                  ))}
               </ul>
             )}
           </div>
+
+          {/* Toggle for older scrolls */}
+          {olderScrolls.length > 0 && (
+            <div
+              className="px-6 py-3 border-t flex items-center justify-center"
+              style={{ borderColor: "var(--color-border)" }}
+            >
+              <button
+                type="button"
+                onClick={() => setShowOlder(!showOlder)}
+                className="ghost-btn"
+                style={{ fontSize: "10px", padding: "7px 14px" }}
+              >
+                {showOlder
+                  ? t("scroll.hideOlder")
+                  : `${t("scroll.showOlder")} · ${olderScrolls.length} ${t("scroll.olderCount")}`}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </section>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Scroll row — shared between recent and older lists
+// ──────────────────────────────────────────────────────────────────────────
+
+function ScrollRow({
+  scroll,
+  statusLabels,
+  t,
+  muted = false,
+}: {
+  scroll: Scroll;
+  statusLabels: Record<TaskStatus, string>;
+  t: (key: any) => string;
+  muted?: boolean;
+}) {
+  return (
+    <li
+      className="px-6 py-5"
+      style={{
+        borderBottom: "1px solid var(--color-border)",
+        opacity: muted ? 0.65 : 1,
+      }}
+    >
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span
+            className="font-display"
+            style={{
+              fontSize: "13px",
+              fontWeight: 600,
+              color: "var(--color-gold)",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+            }}
+          >
+            {scroll.author}
+          </span>
+          {scroll.newStatus && (
+            <span className={`status-badge ${STATUS_BADGE_CLASS[scroll.newStatus]}`}>
+              → {statusLabels[scroll.newStatus]}
+            </span>
+          )}
+        </div>
+        <span
+          className="font-mono"
+          style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}
+        >
+          {format(new Date(scroll.createdAt), "MMM d · HH:mm")}
+        </span>
+      </div>
+
+      <p
+        className="font-prose mt-2"
+        style={{
+          fontSize: "15px",
+          lineHeight: 1.6,
+          color: "var(--color-text-primary)",
+          whiteSpace: "pre-wrap",
+          margin: "8px 0 0",
+        }}
+      >
+        {scroll.message}
+      </p>
+
+      {scroll.taskName && (
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
+          <span className="business-chip">{t("scroll.questChip")}</span>
+          <span style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>
+            {scroll.taskName}
+          </span>
+        </div>
+      )}
+
+      {scroll.links && scroll.links.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-1 list-none m-0 p-0">
+          {scroll.links.map((l, idx) => (
+            <li key={idx} className="flex items-center gap-2 text-[13px]">
+              <LinkIcon size={11} style={{ color: "var(--color-gold)" }} />
+              <a
+                href={l}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: "var(--color-info)", wordBreak: "break-all" }}
+              >
+                {l}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {scroll.files && scroll.files.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-1 list-none m-0 p-0">
+          {scroll.files.map((f, idx) => (
+            <li key={idx} className="flex items-center gap-2 text-[13px]">
+              <Paperclip size={11} style={{ color: "var(--color-gold)" }} />
+              <a
+                href={f.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: "var(--color-info)" }}
+              >
+                {f.name}
+              </a>
+              <span
+                className="font-mono"
+                style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}
+              >
+                {(f.size / 1024).toFixed(1)} KB
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
