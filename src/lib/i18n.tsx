@@ -24,6 +24,28 @@ type DictKey =
   | "tab.olympus"
   | "tab.quests"
   | "tab.scrolls"
+  | "tab.reminders"
+  // Reminders
+  | "rem.composeHeading"
+  | "rem.title"
+  | "rem.titlePlaceholder"
+  | "rem.date"
+  | "rem.time"
+  | "rem.texts"
+  | "rem.textPlaceholder"
+  | "rem.addText"
+  | "rem.removeText"
+  | "rem.submit"
+  | "rem.submitting"
+  | "rem.created"
+  | "rem.upcomingHeading"
+  | "rem.pastHeading"
+  | "rem.empty"
+  | "rem.noPast"
+  | "rem.delete"
+  | "rem.fired"
+  | "rem.in"
+  | "rem.now"
   // Quests editor
   | "quests.editor.heading"
   | "quests.editor.empty"
@@ -127,6 +149,29 @@ const dict: Record<DictKey, Record<Lang, string>> = {
   "tab.olympus": { en: "Olympus", zh: "奥林匹斯" },
   "tab.quests": { en: "Quests", zh: "任务" },
   "tab.scrolls": { en: "Scrolls", zh: "卷轴" },
+  "tab.reminders": { en: "Reminders", zh: "提醒" },
+
+  // Reminders
+  "rem.composeHeading": { en: "Set a Reminder", zh: "设置提醒" },
+  "rem.title": { en: "Title", zh: "标题" },
+  "rem.titlePlaceholder": { en: "Optional headline…", zh: "可选标题…" },
+  "rem.date": { en: "Date", zh: "日期" },
+  "rem.time": { en: "Time", zh: "时间" },
+  "rem.texts": { en: "Messages", zh: "消息" },
+  "rem.textPlaceholder": { en: "What should the reminder say?", zh: "提醒内容是什么？" },
+  "rem.addText": { en: "+ Add another message", zh: "+ 添加另一条消息" },
+  "rem.removeText": { en: "Remove", zh: "删除" },
+  "rem.submit": { en: "Schedule Reminder", zh: "安排提醒" },
+  "rem.submitting": { en: "Scheduling…", zh: "安排中…" },
+  "rem.created": { en: "Reminder scheduled", zh: "提醒已安排" },
+  "rem.upcomingHeading": { en: "Upcoming", zh: "即将到来" },
+  "rem.pastHeading": { en: "Already fired", zh: "已发出" },
+  "rem.empty": { en: "No reminders yet — set one above.", zh: "暂无提醒，可在上方设置。" },
+  "rem.noPast": { en: "No past reminders.", zh: "无历史提醒。" },
+  "rem.delete": { en: "Delete", zh: "删除" },
+  "rem.fired": { en: "Sent", zh: "已发送" },
+  "rem.in": { en: "in", zh: "在" },
+  "rem.now": { en: "due now", zh: "现在到期" },
 
   // Quests editor
   "quests.editor.heading": { en: "All Quests", zh: "全部任务" },

@@ -7,14 +7,15 @@ import Overview from "@/components/Overview";
 import TaskList from "@/components/TaskList";
 import Calendar from "@/components/Calendar";
 import Quests from "@/components/Quests";
+import Reminders from "@/components/Reminders";
 import Scrolls from "@/components/Scrolls";
-import { fetchScrolls, fetchTasks } from "@/lib/api";
+import { fetchReminders, fetchScrolls, fetchTasks } from "@/lib/api";
 import type { TaskFilter } from "@/types";
 import { filterTasks, getTasksByDate } from "@/lib/utils";
 import Toast from "@/components/Toast";
 import { useLang } from "@/lib/i18n";
 
-type DashboardTab = "olympus" | "quests" | "scrolls";
+type DashboardTab = "olympus" | "quests" | "reminders" | "scrolls";
 
 export default function Home() {
   const { t } = useLang();
@@ -27,6 +28,7 @@ export default function Home() {
   const TABS: Array<{ key: DashboardTab; label: string; glyph: string }> = [
     { key: "olympus", label: t("tab.olympus"), glyph: "⚜" },
     { key: "quests", label: t("tab.quests"), glyph: "🗡" },
+    { key: "reminders", label: t("tab.reminders"), glyph: "⏰" },
     { key: "scrolls", label: t("tab.scrolls"), glyph: "📜" },
   ];
 
@@ -42,8 +44,18 @@ export default function Home() {
     revalidateOnFocus: true,
   });
 
+  const { data: reminderData, mutate: mutateReminders } = useSWR(
+    "/api/reminders",
+    fetchReminders,
+    {
+      refreshInterval: 30_000,
+      revalidateOnFocus: true,
+    }
+  );
+
   const tasks = data?.tasks ?? [];
   const scrolls = scrollData?.scrolls ?? [];
+  const reminders = reminderData?.reminders ?? [];
 
   const showToast = useCallback((message: string, type: "success" | "error" | "info") => {
     setToast({ message, type });
@@ -92,6 +104,7 @@ export default function Home() {
 
   const isLoading = !data && !error;
   const isLoadingScrolls = !scrollData;
+  const isLoadingReminders = !reminderData;
 
   return (
     <div className="app-shell">
@@ -136,6 +149,14 @@ export default function Home() {
           tasks={tasks}
           isLoading={isLoading}
           onTasksChange={() => mutateTasks()}
+        />
+      )}
+
+      {activeTab === "reminders" && (
+        <Reminders
+          reminders={reminders}
+          isLoading={isLoadingReminders}
+          onChange={() => mutateReminders()}
         />
       )}
 

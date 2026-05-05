@@ -1,4 +1,4 @@
-import type { NotionTask, Scroll, TaskStatus } from "@/types";
+import type { NotionTask, Reminder, Scroll, TaskStatus } from "@/types";
 import type { N8nRun } from "@/types/n8n";
 
 const API_BASE = "/api";
@@ -95,6 +95,45 @@ export async function postScroll(formData: FormData): Promise<Scroll> {
   const data = await res.json();
   return data.scroll;
 }
+
+// === Reminders ===========================================================
+
+export async function fetchReminders(): Promise<{ reminders: Reminder[] }> {
+  const res = await fetch(`${API_BASE}/reminders`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to fetch reminders");
+  return res.json();
+}
+
+export async function createReminder(input: {
+  title?: string;
+  scheduledAt: string;
+  texts: string[];
+}): Promise<Reminder> {
+  const res = await fetch(`${API_BASE}/reminders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const err = await res.json();
+      detail = err.error || err.details || "";
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail || "Failed to create reminder");
+  }
+  const data = await res.json();
+  return data.reminder;
+}
+
+export async function deleteReminder(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/reminders/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete reminder");
+}
+
+// === n8n (legacy, unused) ===============================================
 
 export async function fetchRecentRuns(): Promise<{
   runs: N8nRun[];
