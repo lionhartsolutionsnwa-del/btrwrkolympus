@@ -112,7 +112,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, dueDate, status = "todo", business } = body;
+    const { name, dueDate, status = "todo", business, description } = body;
     const titlePropertyName = await getDatabaseTitlePropertyName();
 
     if (!name || typeof name !== "string" || !name.trim()) {
@@ -134,6 +134,12 @@ export async function POST(request: Request) {
 
     if (business && typeof business === "string" && business.trim()) {
       properties["Business/Group"] = { select: { name: business.trim() } };
+    }
+
+    if (description && typeof description === "string" && description.trim()) {
+      properties["Task Description"] = {
+        rich_text: [{ text: { content: description.trim() } }],
+      };
     }
 
     const page: any = await notion.pages.create({
@@ -169,7 +175,7 @@ export async function POST(request: Request) {
         name: name.trim(),
         status: status as TaskStatus,
         dueDate: dueDate || null,
-        description: "",
+        description: description?.trim() || "",
         business: business || "",
         createdAt: page.created_time,
       },

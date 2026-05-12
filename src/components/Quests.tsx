@@ -43,6 +43,7 @@ export default function Quests({ tasks, isLoading, onTasksChange }: QuestsProps)
   // ── New quest form ──────────────────────────────────────────────────────
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
   const [newDue, setNewDue] = useState("");
   const [newStatus, setNewStatus] = useState<"todo" | "in_progress">("todo");
   const [newBusiness, setNewBusiness] = useState("");
@@ -57,11 +58,13 @@ export default function Quests({ tasks, isLoading, onTasksChange }: QuestsProps)
     try {
       await createTask({
         name: newName,
+        description: newDescription || undefined,
         dueDate: newDue || undefined,
         status: newStatus,
         business: newBusiness || undefined,
       });
       setNewName("");
+      setNewDescription("");
       setNewDue("");
       setNewStatus("todo");
       setNewBusiness("");
@@ -112,6 +115,15 @@ export default function Quests({ tasks, isLoading, onTasksChange }: QuestsProps)
               className="dark-input"
               autoFocus
               required
+            />
+            <textarea
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              placeholder={t("quests.editor.descriptionPlaceholder")}
+              rows={3}
+              className="dark-input"
+              style={{ resize: "vertical", minHeight: "70px" }}
+              aria-label={t("quests.editor.description")}
             />
             <div className="flex flex-col sm:flex-row gap-2">
               <input

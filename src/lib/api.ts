@@ -25,6 +25,7 @@ export async function createTask(data: {
   dueDate?: string;
   status?: TaskStatus;
   business?: string;
+  description?: string;
 }): Promise<NotionTask> {
   const res = await fetch(`${API_BASE}/tasks`, {
     method: "POST",
