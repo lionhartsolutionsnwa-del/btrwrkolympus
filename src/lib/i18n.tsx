@@ -46,6 +46,19 @@ type DictKey =
   | "rem.fired"
   | "rem.in"
   | "rem.now"
+  | "rem.recurrence"
+  | "rem.recurrence.none"
+  | "rem.recurrence.daily"
+  | "rem.recurrence.weekly"
+  | "rem.recurrence.monthly"
+  | "rem.recurrenceBadge"
+  // Quests search / snooze
+  | "quests.search"
+  | "quests.searchPlaceholder"
+  | "quests.snooze"
+  | "quests.snoozeTomorrow"
+  | "quests.snoozeWeek"
+  | "quests.noMatches"
   // Quests editor
   | "quests.editor.heading"
   | "quests.editor.empty"
@@ -172,6 +185,20 @@ const dict: Record<DictKey, Record<Lang, string>> = {
   "rem.fired": { en: "Sent", zh: "已发送" },
   "rem.in": { en: "in", zh: "在" },
   "rem.now": { en: "due now", zh: "现在到期" },
+  "rem.recurrence": { en: "Repeat", zh: "重复" },
+  "rem.recurrence.none": { en: "Once (no repeat)", zh: "一次（不重复）" },
+  "rem.recurrence.daily": { en: "Daily", zh: "每天" },
+  "rem.recurrence.weekly": { en: "Weekly", zh: "每周" },
+  "rem.recurrence.monthly": { en: "Monthly", zh: "每月" },
+  "rem.recurrenceBadge": { en: "Repeats", zh: "重复" },
+
+  // Quests search / snooze
+  "quests.search": { en: "Search", zh: "搜索" },
+  "quests.searchPlaceholder": { en: "Filter quests by name…", zh: "按名称筛选任务…" },
+  "quests.snooze": { en: "Snooze", zh: "暂缓" },
+  "quests.snoozeTomorrow": { en: "Tomorrow", zh: "明天" },
+  "quests.snoozeWeek": { en: "+1 week", zh: "+1 周" },
+  "quests.noMatches": { en: "No quests match your search.", zh: "没有匹配的任务。" },
 
   // Quests editor
   "quests.editor.heading": { en: "All Quests", zh: "全部任务" },

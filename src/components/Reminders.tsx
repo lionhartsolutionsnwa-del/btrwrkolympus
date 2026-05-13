@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { format, parseISO, formatDistanceToNow, isPast } from "date-fns";
-import { Plus, Trash2, X } from "lucide-react";
-import type { Reminder } from "@/types";
+import { Plus, Repeat, Trash2, X } from "lucide-react";
+import type { Reminder, ReminderRecurrence } from "@/types";
 import { createReminder, deleteReminder } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 
@@ -47,6 +47,7 @@ export default function Reminders({ reminders, isLoading, onChange }: RemindersP
   const [date, setDate] = useState(todayDateInput());
   const [time, setTime] = useState(nowTimeInput());
   const [texts, setTexts] = useState<string[]>([""]);
+  const [recurrence, setRecurrence] = useState<ReminderRecurrence>("none");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [flash, setFlash] = useState("");
@@ -74,11 +75,13 @@ export default function Reminders({ reminders, isLoading, onChange }: RemindersP
         title: title.trim() || undefined,
         scheduledAt: iso,
         texts: cleanTexts,
+        recurrence,
       });
       setTitle("");
       setDate(todayDateInput());
       setTime(nowTimeInput());
       setTexts([""]);
+      setRecurrence("none");
       setFlash(t("rem.created"));
       setTimeout(() => setFlash(""), 2200);
       onChange();
@@ -102,7 +105,10 @@ export default function Reminders({ reminders, isLoading, onChange }: RemindersP
     const up: Reminder[] = [];
     const pa: Reminder[] = [];
     for (const r of reminders) {
-      if (r.firedAt) pa.push(r);
+      // Recurring reminders always show as upcoming (their next occurrence)
+      // even after firing, since they re-schedule themselves automatically.
+      const isRecurring = r.recurrence && r.recurrence !== "none";
+      if (!isRecurring && r.firedAt) pa.push(r);
       else up.push(r);
     }
     return { upcoming: up, past: pa };
@@ -146,6 +152,21 @@ export default function Reminders({ reminders, isLoading, onChange }: RemindersP
               required
             />
           </div>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="eyebrow-label">{t("rem.recurrence")}</label>
+          <select
+            value={recurrence}
+            onChange={(e) => setRecurrence(e.target.value as ReminderRecurrence)}
+            className="ghost-select"
+            aria-label={t("rem.recurrence")}
+          >
+            <option value="none">{t("rem.recurrence.none")}</option>
+            <option value="daily">{t("rem.recurrence.daily")}</option>
+            <option value="weekly">{t("rem.recurrence.weekly")}</option>
+            <option value="monthly">{t("rem.recurrence.monthly")}</option>
+          </select>
         </div>
 
         <div className="flex flex-col gap-2">
@@ -342,6 +363,16 @@ function ReminderRow({
             >
               {format(scheduled, "MMM d · HH:mm")}
             </span>
+            {reminder.recurrence && reminder.recurrence !== "none" && (
+              <span
+                className="business-chip"
+                style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                title={t(`rem.recurrence.${reminder.recurrence}` as any)}
+              >
+                <Repeat size={9} />
+                {t(`rem.recurrence.${reminder.recurrence}` as any)}
+              </span>
+            )}
             {relative && (
               <span
                 className="font-prose"

@@ -9,7 +9,28 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { Reminder } from "@/types";
+import type { Reminder, ReminderRecurrence } from "@/types";
+
+const VALID_RECURRENCE: ReminderRecurrence[] = ["none", "daily", "weekly", "monthly"];
+
+/** Compute the next scheduled_at given the previous one and a recurrence rule.
+ *  Returns null when the reminder is one-shot. */
+function nextOccurrence(prev: Date, rec: ReminderRecurrence): Date | null {
+  if (rec === "none") return null;
+  const next = new Date(prev);
+  if (rec === "daily") next.setUTCDate(next.getUTCDate() + 1);
+  else if (rec === "weekly") next.setUTCDate(next.getUTCDate() + 7);
+  else if (rec === "monthly") next.setUTCMonth(next.getUTCMonth() + 1);
+  // If the new time is still in the past (e.g. cron was offline for a while),
+  // bump forward until it's in the future so we don't fire ten daily catch-ups.
+  const now = new Date();
+  while (next <= now) {
+    if (rec === "daily") next.setUTCDate(next.getUTCDate() + 1);
+    else if (rec === "weekly") next.setUTCDate(next.getUTCDate() + 7);
+    else if (rec === "monthly") next.setUTCMonth(next.getUTCMonth() + 1);
+  }
+  return next;
+}
 
 let pgPool: any = null;
 let pgReady: Promise<void> | null = null;
@@ -36,7 +57,10 @@ async function getPool() {
            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
          );
          CREATE INDEX IF NOT EXISTS reminders_scheduled_idx
-           ON reminders (scheduled_at, fired_at);`
+           ON reminders (scheduled_at, fired_at);
+         -- Recurrence column added 2026-05; safe to re-run via IF NOT EXISTS.
+         ALTER TABLE reminders
+           ADD COLUMN IF NOT EXISTS recurrence TEXT NOT NULL DEFAULT 'none';`
       )
       .then(() => undefined);
   }
@@ -45,6 +69,7 @@ async function getPool() {
 }
 
 function rowToReminder(r: any): Reminder {
+  const rec = VALID_RECURRENCE.includes(r.recurrence) ? r.recurrence : "none";
   return {
     id: r.id,
     title: r.title ?? null,
@@ -53,6 +78,7 @@ function rowToReminder(r: any): Reminder {
         ? r.scheduled_at.toISOString()
         : String(r.scheduled_at),
     texts: Array.isArray(r.texts) ? r.texts : [],
+    recurrence: rec as ReminderRecurrence,
     firedAt: r.fired_at
       ? r.fired_at instanceof Date
         ? r.fired_at.toISOString()
@@ -67,13 +93,15 @@ function rowToReminder(r: any): Reminder {
 
 export async function listReminders(): Promise<Reminder[]> {
   const pool = await getPool();
-  // Pending first (soonest scheduled at top), then fired (most recent first).
+  // Recurring + pending first (soonest scheduled at top), then fired one-shots
+  // (most recent first). Recurring reminders never go to the "past" list because
+  // they have a future scheduled_at after firing.
   const { rows } = await pool.query(
-    `SELECT id, title, scheduled_at, texts, fired_at, created_at
+    `SELECT id, title, scheduled_at, texts, recurrence, fired_at, created_at
      FROM reminders
      ORDER BY
-       (fired_at IS NULL) DESC,
-       CASE WHEN fired_at IS NULL THEN scheduled_at END ASC,
+       (recurrence != 'none' OR fired_at IS NULL) DESC,
+       CASE WHEN recurrence != 'none' OR fired_at IS NULL THEN scheduled_at END ASC,
        fired_at DESC
      LIMIT 200`
   );
@@ -84,6 +112,7 @@ export async function createReminder(input: {
   title?: string | null;
   scheduledAt: string; // ISO
   texts: string[];
+  recurrence?: ReminderRecurrence;
 }): Promise<Reminder> {
   const pool = await getPool();
   const id = randomUUID();
@@ -91,16 +120,21 @@ export async function createReminder(input: {
     .map((t) => (typeof t === "string" ? t.trim() : ""))
     .filter((t) => t.length > 0);
   if (cleanTexts.length === 0) throw new Error("At least one text is required");
+  const recurrence: ReminderRecurrence =
+    input.recurrence && VALID_RECURRENCE.includes(input.recurrence)
+      ? input.recurrence
+      : "none";
 
   const { rows } = await pool.query(
-    `INSERT INTO reminders (id, title, scheduled_at, texts)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, title, scheduled_at, texts, fired_at, created_at`,
+    `INSERT INTO reminders (id, title, scheduled_at, texts, recurrence)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, title, scheduled_at, texts, recurrence, fired_at, created_at`,
     [
       id,
       input.title?.trim() || null,
       input.scheduledAt,
       JSON.stringify(cleanTexts),
+      recurrence,
     ]
   );
   return rowToReminder(rows[0]);
@@ -115,22 +149,64 @@ export async function deleteReminder(id: string): Promise<boolean> {
   return rowCount > 0;
 }
 
-/** Find reminders that are due (scheduled_at <= now AND not yet fired)
- *  and atomically claim them by stamping fired_at. Returns the claimed
- *  rows so the caller can post to Discord without risking double-fire. */
+/** Find reminders that are due and atomically claim them.
+ *  - One-shot reminders ("none"): stamp fired_at = NOW so they never refire.
+ *  - Recurring reminders: stamp fired_at AND advance scheduled_at to the next
+ *    occurrence so the row stays pending for the next cycle.
+ *  Two-phase claim (SELECT for update, then UPDATE in a txn) prevents
+ *  double-fires when multiple pollers race. */
 export async function claimDueReminders(): Promise<Reminder[]> {
   const pool = await getPool();
-  const { rows } = await pool.query(
-    `UPDATE reminders
-     SET fired_at = NOW()
-     WHERE id IN (
-       SELECT id FROM reminders
-       WHERE fired_at IS NULL
-         AND scheduled_at <= NOW()
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // SKIP LOCKED so two pollers don't block on the same rows.
+    const { rows: claimed } = await client.query(
+      `SELECT id, title, scheduled_at, texts, recurrence, fired_at, created_at
+       FROM reminders
+       WHERE scheduled_at <= NOW()
+         AND (
+           fired_at IS NULL
+           OR (recurrence != 'none' AND fired_at < scheduled_at)
+         )
        ORDER BY scheduled_at ASC
        LIMIT 50
-     )
-     RETURNING id, title, scheduled_at, texts, fired_at, created_at`
-  );
-  return rows.map(rowToReminder);
+       FOR UPDATE SKIP LOCKED`
+    );
+
+    for (const r of claimed) {
+      const rec = (
+        VALID_RECURRENCE.includes(r.recurrence) ? r.recurrence : "none"
+      ) as ReminderRecurrence;
+      if (rec === "none") {
+        await client.query(
+          `UPDATE reminders SET fired_at = NOW() WHERE id = $1`,
+          [r.id]
+        );
+      } else {
+        const prevScheduled = new Date(r.scheduled_at);
+        const next = nextOccurrence(prevScheduled, rec);
+        if (!next) {
+          await client.query(
+            `UPDATE reminders SET fired_at = NOW() WHERE id = $1`,
+            [r.id]
+          );
+        } else {
+          await client.query(
+            `UPDATE reminders
+             SET fired_at = NOW(), scheduled_at = $2
+             WHERE id = $1`,
+            [r.id, next.toISOString()]
+          );
+        }
+      }
+    }
+    await client.query("COMMIT");
+    return claimed.map(rowToReminder);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }

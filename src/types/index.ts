@@ -37,14 +37,18 @@ export interface Scroll {
   createdAt: string;
 }
 
+export type ReminderRecurrence = "none" | "daily" | "weekly" | "monthly";
+
 export interface Reminder {
   id: string;
   title: string | null;
-  /** ISO timestamp (UTC) when this should fire */
+  /** ISO timestamp (UTC) when this should fire next */
   scheduledAt: string;
   /** One or more message bodies — each posts as a separate Discord message */
   texts: string[];
-  /** ISO timestamp when the reminder was fired, or null if still pending */
+  /** How often to repeat. "none" = one-shot. */
+  recurrence: ReminderRecurrence;
+  /** ISO timestamp when the reminder LAST fired, or null if never */
   firedAt: string | null;
   createdAt: string;
 }

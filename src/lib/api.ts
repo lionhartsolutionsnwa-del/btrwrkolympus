@@ -1,4 +1,4 @@
-import type { NotionTask, Reminder, Scroll, TaskStatus } from "@/types";
+import type { NotionTask, Reminder, ReminderRecurrence, Scroll, TaskStatus } from "@/types";
 import type { N8nRun } from "@/types/n8n";
 
 const API_BASE = "/api";
@@ -109,6 +109,7 @@ export async function createReminder(input: {
   title?: string;
   scheduledAt: string;
   texts: string[];
+  recurrence?: ReminderRecurrence;
 }): Promise<Reminder> {
   const res = await fetch(`${API_BASE}/reminders`, {
     method: "POST",

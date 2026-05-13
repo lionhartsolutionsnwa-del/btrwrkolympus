@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { createReminder, listReminders } from "@/lib/reminders-store";
+import type { ReminderRecurrence } from "@/types";
+
+const VALID_RECURRENCE: ReminderRecurrence[] = ["none", "daily", "weekly", "monthly"];
 
 export async function GET() {
   try {
@@ -20,6 +23,9 @@ export async function POST(request: Request) {
     const title = typeof body.title === "string" ? body.title : null;
     const scheduledAt = String(body.scheduledAt || "");
     const texts = Array.isArray(body.texts) ? body.texts : [];
+    const recurrence: ReminderRecurrence = VALID_RECURRENCE.includes(body.recurrence)
+      ? body.recurrence
+      : "none";
 
     if (!scheduledAt) {
       return NextResponse.json(
@@ -40,6 +46,7 @@ export async function POST(request: Request) {
       title,
       scheduledAt: ts.toISOString(),
       texts,
+      recurrence,
     });
     return NextResponse.json({ success: true, reminder });
   } catch (err: any) {

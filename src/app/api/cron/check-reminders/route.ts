@@ -41,6 +41,10 @@ export async function GET(request: Request) {
       const headerTitle = reminder.title?.trim() || "⏰ Reminder";
 
       // First text in an embed
+      const recBadge =
+        reminder.recurrence && reminder.recurrence !== "none"
+          ? ` · 🔁 ${reminder.recurrence}`
+          : "";
       await notifyDiscord({
         embeds: [
           {
@@ -48,7 +52,7 @@ export async function GET(request: Request) {
             description: reminder.texts[0],
             color: DISCORD_COLORS.amber,
             timestamp: reminder.scheduledAt,
-            footer: { text: "Olympus · Reminder" },
+            footer: { text: `Olympus · Reminder${recBadge}` },
           },
         ],
       });

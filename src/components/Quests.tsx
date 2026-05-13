@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { format, parseISO } from "date-fns";
-import { ChevronDown, Pencil, Plus, X } from "lucide-react";
+import { CalendarClock, ChevronDown, Clock, Pencil, Plus, X } from "lucide-react";
 import type { NotionTask, TaskStatus } from "@/types";
 import { createTask, fetchBusinesses, updateTask } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
@@ -41,6 +41,7 @@ export default function Quests({ tasks, isLoading, onTasksChange }: QuestsProps)
   const businesses = businessData?.businesses ?? [];
 
   // ── New quest form ──────────────────────────────────────────────────────
+  const [search, setSearch] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
@@ -77,15 +78,25 @@ export default function Quests({ tasks, isLoading, onTasksChange }: QuestsProps)
     }
   };
 
-  // Sort: open quests first by due date asc, then completed at the bottom
-  const sortedTasks = [...tasks].sort((a, b) => {
-    const aDone = a.status === "done";
-    const bDone = b.status === "done";
-    if (aDone !== bDone) return aDone ? 1 : -1;
-    const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
-    const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
-    return aDue - bDue;
-  });
+  // Sort: open quests first by due date asc, then completed at the bottom.
+  // Filter by search query (matches name, description, business — case-insensitive).
+  const sortedTasks = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? tasks.filter((t) => {
+          const hay = `${t.name} ${t.description || ""} ${t.business || ""}`.toLowerCase();
+          return hay.includes(q);
+        })
+      : tasks;
+    return [...filtered].sort((a, b) => {
+      const aDone = a.status === "done";
+      const bDone = b.status === "done";
+      if (aDone !== bDone) return aDone ? 1 : -1;
+      const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+      const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+      return aDue - bDue;
+    });
+  }, [tasks, search]);
 
   return (
     <section className="flex-1 min-h-0 px-5 lg:px-8 py-5 lg:py-6 flex flex-col gap-4 overflow-hidden">
@@ -178,16 +189,30 @@ export default function Quests({ tasks, isLoading, onTasksChange }: QuestsProps)
       {/* Quest list */}
       <div className="surface-panel flex flex-col flex-1 min-h-0 overflow-hidden">
         <div
-          className="px-6 py-4 border-b flex items-center justify-between"
+          className="px-6 py-4 border-b flex items-center justify-between gap-3 flex-wrap"
           style={{ borderColor: "var(--color-border)" }}
         >
           <h2 className="section-title">{t("quests.editor.heading")}</h2>
-          <span
-            className="font-mono"
-            style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}
-          >
-            {tasks.length}
-          </span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("quests.searchPlaceholder")}
+              className="dark-input"
+              style={{ width: "240px", padding: "7px 12px", fontSize: "12px" }}
+              aria-label={t("quests.search")}
+            />
+            <span
+              className="font-mono"
+              style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}
+            >
+              {sortedTasks.length}
+              {search.trim() && tasks.length !== sortedTasks.length
+                ? ` / ${tasks.length}`
+                : ""}
+            </span>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -211,7 +236,9 @@ export default function Quests({ tasks, isLoading, onTasksChange }: QuestsProps)
                 className="font-prose"
                 style={{ fontSize: "15px", color: "var(--color-text-tertiary)" }}
               >
-                {t("quests.editor.empty")}
+                {search.trim() && tasks.length > 0
+                  ? t("quests.noMatches")
+                  : t("quests.editor.empty")}
               </p>
             </div>
           ) : (
@@ -274,6 +301,22 @@ function QuestRow({ task, businesses, statusLabels, onSaved, t }: QuestRowProps)
     task.status,
     task.business,
   ]);
+
+  const handleSnooze = async (days: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Push by N days from the current due date, or N days from today if no due.
+    const base = task.dueDate ? new Date(task.dueDate) : new Date();
+    base.setDate(base.getDate() + days);
+    const newDue = base.toISOString().slice(0, 10);
+    try {
+      await updateTask(task.id, { dueDate: newDue });
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1800);
+      onSaved();
+    } catch (err: any) {
+      setError(err.message || "Failed to snooze");
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -357,6 +400,33 @@ function QuestRow({ task, businesses, statusLabels, onSaved, t }: QuestRowProps)
             )}
           </div>
         </div>
+        {/* Snooze buttons — only for open quests with a due date */}
+        {task.status !== "done" && (
+          <div className="flex items-center gap-1" style={{ flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={(e) => handleSnooze(1, e)}
+              className="ghost-btn"
+              style={{ padding: "5px 9px", fontSize: "10px" }}
+              title={t("quests.snoozeTomorrow")}
+              aria-label={`${t("quests.snooze")} ${t("quests.snoozeTomorrow")}`}
+            >
+              <Clock size={11} />
+              +1d
+            </button>
+            <button
+              type="button"
+              onClick={(e) => handleSnooze(7, e)}
+              className="ghost-btn"
+              style={{ padding: "5px 9px", fontSize: "10px" }}
+              title={t("quests.snoozeWeek")}
+              aria-label={`${t("quests.snooze")} ${t("quests.snoozeWeek")}`}
+            >
+              <CalendarClock size={11} />
+              +1w
+            </button>
+          </div>
+        )}
         {savedFlash && (
           <span
             className="font-display"
